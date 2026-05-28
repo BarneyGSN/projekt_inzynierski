@@ -1,3 +1,4 @@
 *.ply
+*.pptx
 .vite/
 node_modules/

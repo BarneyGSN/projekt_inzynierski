@@ -29,27 +29,28 @@ const centerLat = 52.22;
 
 const createGridLayer = () => {
     const gridData = [];
-    const spacing = 50;
+    const spacingMeters = 50;
     const linesCount = 40;
     const half = Math.floor(linesCount / 2);
-    const scaleFactor = Math.cos((centerLat * Math.PI) / 180)
-    const spacingX = spacing / scaleFactor;
-    const spacingY = spacing;
 
-    const maxDistX = half * spacingX;
-    const maxDistY = half * spacingY;
+    const latRad = (centerLat * Math.PI) / 180;
+    const spacingLat = spacingMeters / 111320;
+    const spacingLon = spacingMeters / (111320 * Math.cos(latRad));
+
 
     for (let i = -half; i <= half; i++) {
-        const offsetX = i * spacingX;
-        const offsetY = i * spacingY;
+        const offsetLon = i * spacingLon;
+        const offsetLat = i * spacingLat;
 
+       const maxDistLon = half * spacingLon;
+       const maxDistLat = half * spacingLat;
         gridData.push({
-            from: [-maxDistX, offsetY, 0],
-            to: [maxDistX, offsetY, 0]
+            from: [centerLon - maxDistLon, centerLat + offsetLat, 0],
+            to: [centerLon + maxDistLon, centerLat + offsetLat, 0]
         });
         gridData.push({
-            from: [offsetX, -maxDistY, 0],
-            to: [offsetX, maxDistY, 0]
+            from: [centerLon + offsetLon, centerLat - maxDistLat, 0],
+            to: [centerLon + offsetLon, centerLat + maxDistLat, 0]
         });
     }
     console.log(gridData);
@@ -58,45 +59,118 @@ const createGridLayer = () => {
 
 const ply_file = "/T_II_73_d3.ply"
 
-const deckglLayer = new Deck({
-    canvas: 'deck-container',
-    width: '100%',
-    height: '100%',
-    initialViewState: {
-        target: [0, 0, 0],
-        zoom: 15,
-        pitch: 60,
-        bearing: 0,
-    },
-    controller: false,
-    parameters: {
-        depthTest: true,
-        depthMask: true,
-    },
-    layers: [
-        new LineLayer({
-            id: 'white-grid',
-            data: createGridLayer(),
-            coordinateMode: 0,
-            coordinateOrigin: [centerLon, centerLat, 0],
-            getSourcePosition: d => d.from,
-            getTargetPosition: d => d.to,
-            getColor: [255, 255, 255, 220],
-            getWidth: 2,
-            widthUnits: 'pixels'
-        }),
-        new PointCloudLayer({
-            id: 'ply-point-cloud-layer',
-            data: ply_file,
-            coordinateMode: 0,
-            coordinateOrigin: [centerLon, centerLat, 0],
-            getPosition: d => d.position,
-            getColor: d => [255, 255, 0],
-            pointSize: 4,
-            loaders: [PLYLoader]
-        })
-    ]
-})
+const transformMetersToLngLat = (metresBuffer, centerLon, centerLat) => {
+    const metresPerDegreeLat = 111320;
+    const latRad = (centerLat * Math.PI) / 180;
+    const metresPerDegreeLon = 111320 * Math.cos(latRad);
+
+    const lngLatBuffer = new Float32Array(metresBuffer.length);
+
+    for (let i = 0; i < metresBuffer.length; i += 3) {
+        let x = metresBuffer[i];
+        let y = metresBuffer[i + 1];
+        let z = metresBuffer[i + 2];
+
+        lngLatBuffer[i] = centerLon + (x / metresPerDegreeLon);
+        lngLatBuffer[i + 1] = centerLat + (y / metresPerDegreeLat);
+        lngLatBuffer[i + 2] = z;
+    }
+    return lngLatBuffer;
+}
+
+let deckGlLayer = null;
+
+fetch(ply_file)
+    .then(res => {
+        if (!res.ok) {
+            throw new Error ("Nie można pobrać pliku PLY")
+        }
+        return res.arrayBuffer();
+    })
+    .then(buffer => {
+        const bytes = new Uint8Array(buffer);
+        const headerText = "end_header";
+        let headerOffset = 0;
+
+        for (let i = 0; i < bytes.length - 20; i++) {
+            const subArray = bytes.slice(i, i + headerText.length);
+            const textChunk = String.fromCharCode.apply(null, Array.from(subArray));
+            if (textChunk === headerText) {
+                headerOffset = i + headerText.length;
+                while (bytes[headerOffset] === 10 || bytes[headerOffset] === 13) {
+                    headerOffset++;
+                }
+                break;
+            }
+        }
+
+        const allFloats = new Float32Array(buffer, headerOffset);
+        const propertiesPerVertex = 17;
+        const totalVertices = Math.floor(allFloats.length / propertiesPerVertex);
+
+        const cleanCoords = new Float32Array(totalVertices * 3);
+        let coordIndex = 0;
+
+        for (let i = 0; i < allFloats.length; i += propertiesPerVertex) {
+            let x = allFloats[i];
+            let y = allFloats[i + 1];
+            let z = allFloats[i + 2];
+
+            cleanCoords[coordIndex] = x;
+            cleanCoords[coordIndex + 1] = y;
+            cleanCoords[coordIndex + 2] = z;
+
+            coordIndex += 3;
+        }
+        const lngLatData = transformMetersToLngLat(cleanCoords, centerLon, centerLat);
+
+        deckGlLayer = new Deck({
+            canvas: 'deck-container',
+            width: '100%',
+            height: '100%',
+            initialViewState: {
+                target: [0, 0, 0],
+                zoom: 15,
+                pitch: 60,
+                bearing: 0,
+            },
+            controller: false,
+            parameters: {
+                depthTest: true,
+                depthMask: true,
+            },
+            layers: [
+                new LineLayer({
+                    id: 'white-grid',
+                    data: createGridLayer(),
+                    coordinateMode: 0,
+                    coordinateOrigin: [centerLon, centerLat, 0],
+                    getSourcePosition: d => d.from,
+                    getTargetPosition: d => d.to,
+                    getColor: [255, 255, 255, 220],
+                    getWidth: 2,
+                    widthUnits: 'pixels'
+                }),
+                new PointCloudLayer({
+                    id: 'ply-point-cloud-layer',
+                    data: {
+                        length: lngLatData.length / 3,
+                        attributes: {
+                            getPosition:  {value: lngLatData, size: 3}
+                        }
+                    },
+                    coordinateMode: 1,
+                    coordinateOrigin: [centerLon, centerLat, 0],
+                    getColor: d => [255, 255, 0],
+                    pointSize: 4,
+                    loaders: [PLYLoader]
+                })
+            ]
+        });
+        viewer.scene.postRender.addEventListener(syncCameras);
+        console.log("Scena została zainizjalizowana pomyślnie.");
+    })
+    .catch(error => console.log("Błąd w potoku danych:", error));
 
 const syncCameras = () => {
     const camera = viewer.camera;
@@ -106,7 +180,7 @@ const syncCameras = () => {
         const height = cartographic.height;
         const zoom = Math.log2(40075016 / (height * 2)) - 1;
 
-        deckglLayer.setProps({
+        deckGlLayer.setProps({
             viewState: {
                 target: [0, 0, 0],
                 longitude: Cesium.Math.toDegrees(cartographic.longitude),
@@ -119,7 +193,6 @@ const syncCameras = () => {
     }
 };
 
-viewer.scene.postRender.addEventListener(syncCameras)
 
 viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 1500),
