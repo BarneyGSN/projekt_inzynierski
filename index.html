@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <title>Narzędzie do wizualizacji i edycji obiektów 3D</title>
     <link href="https://cesium.com/downloads/cesiumjs/releases/1.116/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         html, body {margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;}
         #appcontainer {
@@ -17,9 +20,8 @@
             left: 0;
             width: 100%;
             height: 100%;
-            color: black
         }
-        #deck-container {
+        #three-container {
             position: absolute;
             top: 0;
             left: 0;
@@ -28,14 +30,28 @@
             height: 100%;
             pointer-events: none;
         }
+        #editor-panel {
+            position: absolute;
+            z-index: 20;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        #editor-panel button {
+            padding: 6px 10px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
-    <div id="appcontainer">
-        <div id="cesiumContainer"></div>
-        <canvas id="deck-container"></canvas>
-    </div>
-    <script type="module" src="./main.js"></script>
-    <script src="https://unpkg.com/plyparser@latest/PLYParser.js" type="text/javascript"></script>
+<div id="appcontainer">
+    <div id="cesiumContainer"></div>
+    <canvas id="three-container"></canvas>
+    <lower-bar title="Gaussian Splatting Viewer"></lower-bar>
+    <import-box title="Dodaj pliki projektu"></import-box>
+</div>
+<script type="module" src="./main.js"></script>
 </body>
 </html>
