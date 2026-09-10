@@ -2,6 +2,9 @@ import { LitElement, html, css } from "lit";
 
 export class ImportBox extends LitElement {
     static styles = css`
+        input[type="file"]{
+            display: none;
+        }
         :host {
             display: block;
             position: absolute;
@@ -13,8 +16,7 @@ export class ImportBox extends LitElement {
         }
 
         .panel {
-            /* Główny grafit UI wyróżniający się z czerni (#000000) */
-            background: rgba(30, 34, 42, 0.92);
+            background: rgba(20, 20, 20, 0.85);
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 8px;
@@ -53,7 +55,7 @@ export class ImportBox extends LitElement {
         .dropdown-content {
             display: none;
             position: absolute;
-            top: calc(100% + 4px);
+            top: 4px;
             left: 0;
             min-width: 150px;
             background: rgba(24, 27, 33, 0.98);
@@ -74,8 +76,7 @@ export class ImportBox extends LitElement {
             border-radius: 4px;
             transition: background 0.15s ease, color 0.15s ease;
         }
-
-        /* Podświetlenie aktywnej opcji menu */
+        
         .dropdown-content a:hover {
             background: rgba(59, 130, 246, 0.2); /* Delikatny akcent błękitny */
             color: #60a5fa;
@@ -85,6 +86,25 @@ export class ImportBox extends LitElement {
             display: block;
         }
     `;
+
+    _openFileDialog() {
+        const fileInput = this.renderRoot.querySelector('input');
+        if (fileInput) {
+            fileInput.value = '';
+            fileInput.click();
+        }
+    }
+
+    _onFileSelected(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        this.dispatchEvent(new CustomEvent('file-loaded', {
+            detail: {file},
+            bubbles: true,
+            composed: true
+        }));
+    }
 
     static properties = {
         title: { type: String }
@@ -97,11 +117,17 @@ export class ImportBox extends LitElement {
 
     render() {
         return html`
+            <input 
+                type = 'file'
+                id = 'typefile'
+                accept = '.ply'
+                @change = "${this._onFileSelected}"
+            />
             <div class="panel">
                 <div class="dropdown">
                     <button class="dropbtn">Plik</button>
                     <div class="dropdown-content">
-                        <a href="#">Import</a>
+                        <button @click="${this._openFileDialog}">Import</button>
                         <a href="#">Export</a>
                     </div>
                 </div>

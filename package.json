@@ -7,6 +7,7 @@
     "@mkkellogg/gaussian-splats-3d": "^0.4.7",
     "cesium": "^1.140.0",
     "lit": "^3.3.3",
+    "npm": "^12.0.2",
     "playcanvas": "^2.19.7",
     "plyparser": "^5.0.0",
     "three": "^0.184.0"

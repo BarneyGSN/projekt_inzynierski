@@ -53,13 +53,18 @@ const splatViewer = new GaussianSplats3D.Viewer({
     sharedMemoryForWorkers: false
 });
 
-// Referencja do paska Lit
 const lBarUI = document.querySelector('lower-bar');
 
-async function loadCleanedSplatScene(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Nie można pobrać pliku PLY');
-    const buffer = await res.arrayBuffer();
+async function loadCleanedSplatScene(source) {
+    let buffer;
+
+    if (source instanceof File) {
+        buffer = await source.arrayBuffer();
+    } else {
+        const res = await fetch(source);
+        if (!res.ok) throw new Error ("Nie można pobrać pliku PLY")
+        buffer = await res.arrayBuffer();
+    }
 
     const { allFloats, totalVertices } = parsePly(buffer);
 
@@ -90,7 +95,14 @@ async function loadCleanedSplatScene(url) {
     }
 }
 
-loadCleanedSplatScene(ply_file).catch(err => console.error('Błąd ładowania/oczyszczania PLY', err));
+const importUI = document.querySelector('import-box');
+if (importUI) {
+    importUI.addEventListener('file-loaded', async(e) => {
+        const file = e.detail.file;
+
+        loadCleanedSplatScene(file).catch(err => console.error('Błąd ładowania/oczyszczania PLY', err));
+    })
+}
 
 // --- Synchronizacja kamer ---
 const syncCameras = () => {

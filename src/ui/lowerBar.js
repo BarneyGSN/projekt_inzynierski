@@ -10,17 +10,17 @@ export class LowerBar extends LitElement {
             right: 0;
             z-index: 1000;
             box-sizing: border-box;
-            pointer-events: auto; /* Zapewnia klikalność nad warstwą WebGL */
+            pointer-events: auto; /
         }
 
         .panel {
             background: rgba(20, 20, 20, 0.85);
             backdrop-filter: blur(8px);
-            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
             padding: 12px 24px;
             color: #ffffff;
             font-family: sans-serif;
-            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
             box-sizing: border-box;
         }
 
