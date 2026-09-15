@@ -5,6 +5,8 @@ import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 import { buildPlySubset, filterNoisyVertices, parsePly, plyBufferToBlobUrl } from './plyutils.js';
 import './src/ui/lowerBar.js';
 import './src/ui/importBox.js';
+import './src/ui/FileList';
+import {setupLayerManager, registerLayer, removeLayer} from "./deleteFile";
 
 Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIwZGI0MGFiOS1jZmZiLTQxMDMtYmI4Yi02ZTg1ZGI0MjgxYzYiLCJpZCI6NDIzNzU1LCJpYXQiOjE3NzcyMDYwNTR9.-6Mf9nmT3ItEZ0-6Ey1rv6mUgjrQceH84DyWZnnzT4A';
 
@@ -32,7 +34,6 @@ const centerLon = 21.01;
 const centerLat = 52.22;
 const ply_file = "/T_II_73_d3.ply";
 
-// --- Three.js setup ---
 const threeCanvas = document.getElementById('three-container');
 const threeRenderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
 threeRenderer.setSize(window.innerWidth, window.innerHeight);
@@ -43,7 +44,6 @@ const threeCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.i
 const gridHelper = new THREE.GridHelper(2000, 40, 0xffffff, 0xffffff);
 threeScene.add(gridHelper);
 
-// --- Loader Gaussian Splatting ---
 const splatViewer = new GaussianSplats3D.Viewer({
     scene: threeScene,
     camera: threeCamera,
@@ -54,9 +54,15 @@ const splatViewer = new GaussianSplats3D.Viewer({
 });
 
 const lBarUI = document.querySelector('lower-bar');
+const fileListEl = document.querySelector('file-list');
+if(fileListEl) {
+    setupLayerManager(fileListEl, splatViewer, threeScene);
+}
 
 async function loadCleanedSplatScene(source) {
     let buffer;
+
+    const fileName = source instanceof File ? source.name : source.split('/').pop();
 
     if (source instanceof File) {
         buffer = await source.arrayBuffer();
@@ -66,17 +72,17 @@ async function loadCleanedSplatScene(source) {
         buffer = await res.arrayBuffer();
     }
 
-    const { allFloats, totalVertices } = parsePly(buffer);
+    const { allFloats, totalVertices, indices, headerText } = parsePly(buffer);
 
-    const keptIndices = filterNoisyVertices(allFloats, totalVertices, {
+    const keptIndices = filterNoisyVertices(allFloats, totalVertices, indices, {
         opacityThreshold: 0.02,
         maxScaleFactor: 8,
         maxDistanceFactor: Infinity
     });
 
-    const cleanedBuffer = buildPlySubset(allFloats, keptIndices);
+    const cleanedBuffer = buildPlySubset(allFloats, keptIndices, indices.stride, headerText);
     const blobUrl = plyBufferToBlobUrl(cleanedBuffer);
-
+    const sceneIndex = splatViewer.splatMesh ? splatViewer.splatMesh.scenes.length : 0;
     await splatViewer.addSplatScene(blobUrl, {
         format: GaussianSplats3D.SceneFormat.Ply,
         splatAlphaRemovalThreshold: 1,
@@ -86,10 +92,19 @@ async function loadCleanedSplatScene(source) {
         scale: [1, 1, 1]
     });
 
+    if (fileListEl) {
+        registerLayer({
+            id: Date.now(),
+            name: fileName,
+            blobUrl: blobUrl,
+            mesh: sceneIndex
+        }, fileListEl);
+
+    }
+
     URL.revokeObjectURL(blobUrl);
     console.log("Oczyszczona scena splatów załadowana");
 
-    // Dynamiczna aktualizacja licznika w komponencie Lit
     if (lBarUI) {
         lBarUI.pointCount = keptIndices.length;
     }
@@ -104,7 +119,6 @@ if (importUI) {
     })
 }
 
-// --- Synchronizacja kamer ---
 const syncCameras = () => {
     const camera = viewer.camera;
 
@@ -132,7 +146,6 @@ const syncCameras = () => {
 
 viewer.scene.postRender.addEventListener(syncCameras);
 
-// Ustawienie początkowe kamery
 viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 100),
     orientation: {
@@ -142,7 +155,6 @@ viewer.camera.setView({
     }
 });
 
-// Obsługa zdarzenia resetu kamery z komponentu Lit
 if (lBarUI) {
     lBarUI.addEventListener('reset-camera', () => {
         viewer.camera.flyTo({

@@ -1,21 +1,10 @@
-// plyUtils.js
-// Narzędzia do pracy z surowymi danymi 3D Gaussian Splatting w formacie PLY.
-// Layout: 62 floaty na wierzchołek:
-//   [0-2]   pozycja x,y,z
-//   [3-5]   normalna nx,ny,nz
-//   [6-8]   DC harmoniki sferycznej (kolor bazowy)
-//   [9-53]  pozostałe współczynniki SH (45 wartości)
-//   [54]    opacity (przed sigmoidem)
-//   [55-57] log-scale x,y,z
-//   [58-61] rotacja: qw,qx,qy,qz
-
-export const PROPERTIES_PER_VERTEX = 62;
-
 export function parsePly(buffer) {
     const bytes = new Uint8Array(buffer);
     const headerMarker = "end_header";
+    const propertyMarker = "property";
     let headerOffset = 0;
     let headerEndIndex = 0;
+    let propertiesCount = 0;
 
     for (let i = 0; i < bytes.length - headerMarker.length; i++) {
         const chunk = String.fromCharCode.apply(null, Array.from(bytes.slice(i, i + headerMarker.length)));
@@ -27,10 +16,34 @@ export function parsePly(buffer) {
         }
     }
 
-    const allFloats = new Float32Array(buffer, headerOffset);
-    const totalVertices = Math.floor(allFloats.length / PROPERTIES_PER_VERTEX);
+    const headerText = new TextDecoder().decode(bytes.slice(0, headerOffset));
+    const lines = headerText.split('\n');
+    const propertyNames = [];
+    for (const line of lines) {
+        const trimmedLine = line.trim();
+        if (trimmedLine.startsWith(propertyMarker)) {
+            const parts = line.split(/\s+/ );
+            const propertyName = parts[2];
+            propertyNames.push(propertyName);
+        }
+    }
 
-    return { allFloats, totalVertices };
+    const propertiesPerVertex = propertyNames.length;
+    const allFloats = new Float32Array(buffer.slice(headerOffset));
+    const totalVertices = Math.floor(allFloats.length / propertiesPerVertex);
+
+    const indices = {
+        stride: propertiesPerVertex,
+        x: propertyNames.indexOf("x"),
+        y: propertyNames.indexOf("y"),
+        z: propertyNames.indexOf("z"),
+        opacityIndex: propertyNames.indexOf("opacity"),
+        scale0Index: propertyNames.indexOf("scale_0"),
+        scale1Index: propertyNames.indexOf("scale_1"),
+        scale2Index: propertyNames.indexOf("scale_2")
+    }
+    return { allFloats, totalVertices , indices, headerText};
+
 }
 
 function median(arr) {
@@ -44,7 +57,7 @@ function median(arr) {
  * Odrzuca: zbyt niską opacity, nietypowo dużą skalę ("igły"), nietypowo dużą
  * odległość od mediany pozycji (odosobnione floaters).
  */
-export function filterNoisyVertices(allFloats, totalVertices, opts = {}) {
+export function filterNoisyVertices(allFloats, totalVertices, indices, opts = {}) {
     const {
         opacityThreshold = 0.05,
         maxScaleFactor = 8,
@@ -58,15 +71,15 @@ export function filterNoisyVertices(allFloats, totalVertices, opts = {}) {
     const zs = new Float32Array(totalVertices);
 
     for (let i = 0; i < totalVertices; i++) {
-        const base = i * PROPERTIES_PER_VERTEX;
-        opacities[i] = 1.0 / (1.0 + Math.exp(-allFloats[base + 54]));
-        const s0 = Math.exp(allFloats[base + 55]);
-        const s1 = Math.exp(allFloats[base + 56]);
-        const s2 = Math.exp(allFloats[base + 57]);
+        const base = i * indices.stride;
+        opacities[i] = 1.0 / (1.0 + Math.exp(-allFloats[base + indices.opacityIndex]));
+        const s0 = Math.exp(allFloats[base + indices.scale0Index]);
+        const s1 = Math.exp(allFloats[base + indices.scale1Index]);
+        const s2 = Math.exp(allFloats[base + indices.scale2Index]);
         maxScales[i] = Math.max(s0, s1, s2);
-        xs[i] = allFloats[base];
-        ys[i] = allFloats[base + 1];
-        zs[i] = allFloats[base + 2];
+        xs[i] = allFloats[base + indices.x];
+        ys[i] = allFloats[base + indices.y];
+        zs[i] = allFloats[base + indices.z];
     }
 
     const centerX = median(xs);
@@ -108,52 +121,33 @@ export function filterNoisyVertices(allFloats, totalVertices, opts = {}) {
  * binarnych (odczytywany jako Float32Array) zaczynałby się z przesunięciem
  * o 1-3 bajty, co daje losowe/ekstremalne wartości (objaw: "kolorowe linie").
  */
-function buildAlignedHeader(count) {
-    const bodyWithoutEndHeader =
-        `ply\n` +
-        `format binary_little_endian 1.0\n` +
-        `element vertex ${count}\n` +
-        `property float x\nproperty float y\nproperty float z\n` +
-        `property float nx\nproperty float ny\nproperty float nz\n` +
-        `property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n` +
-        Array.from({ length: 45 }, (_, i) => `property float f_rest_${i}\n`).join('') +
-        `property float opacity\n` +
-        `property float scale_0\nproperty float scale_1\nproperty float scale_2\n` +
-        `property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\n`;
+function buildDynamicAlignedHeader(originalHeaderText, newCount) {
+    let header = originalHeaderText.replace(/element vertex \d+/, `element vertex ${newCount}`);
+    header = header.replace(/comment align_pad_.*\n/, '');
 
-    const endHeaderLine = `end_header\n`;
-    const baseLength = new TextEncoder().encode(bodyWithoutEndHeader + endHeaderLine).length;
+    const endHeaderIndex = header.indexOf('end_header');
+    const beforeEnd = header.slice(0, endHeaderIndex);
+    const endPart = header.slice(endHeaderIndex);
 
-    // Minimalna linia komentarza to "comment \n" = 9 bajtów (bez wypełniacza).
-    // Dobieramy długość wypełniacza tak, by finalna długość nagłówka była %4===0.
-    const minCommentLen = 9;
-    const remainder = (baseLength + minCommentLen) % 4;
+    const baseLength = new TextEncoder().encode(beforeEnd + endPart).length;
+    const minCommentLength = 9;
+    const remainder = (baseLength + minCommentLength) % 4;
     const fillerLen = (4 - remainder) % 4;
-    const commentLine = `comment ${'x'.repeat(fillerLen)}\n`;
+    const commentLine = `comment align_pad_${fillerLen} \n`;
 
-    const fullHeader = bodyWithoutEndHeader + commentLine + endHeaderLine;
-
-    // Weryfikacja — jeśli to kiedykolwiek nie zgra się, chcemy to widzieć w konsoli od razu.
-    const finalLength = new TextEncoder().encode(fullHeader).length;
-    if (finalLength % 4 !== 0) {
-        console.warn('Nagłówek PLY nadal niewyrównany do 4 bajtów! Długość:', finalLength);
-    }
-
-    return fullHeader;
+    return beforeEnd + commentLine + endPart;
 }
 
-/** Buduje nowy, poprawny binarny PLY z podzbioru wierzchołków (wskazanych indeksami). */
-export function buildPlySubset(allFloats, vertexIndices) {
-    const count = vertexIndices.length;
-
-    const header = buildAlignedHeader(count);
+export function buildPlySubset(allFloats, vertexIndexes, stride, originalHeaderText) {
+    const count = vertexIndexes.length;
+    const header = buildDynamicAlignedHeader(originalHeaderText, count);
     const headerBytes = new TextEncoder().encode(header);
-    const dataFloats = new Float32Array(count * PROPERTIES_PER_VERTEX);
+    const dataFloats = new Float32Array(count * stride);
 
     for (let i = 0; i < count; i++) {
-        const srcBase = vertexIndices[i] * PROPERTIES_PER_VERTEX;
-        const dstBase = i * PROPERTIES_PER_VERTEX;
-        dataFloats.set(allFloats.subarray(srcBase, srcBase + PROPERTIES_PER_VERTEX), dstBase);
+        const base = vertexIndexes[i] * stride;
+        const dstBase = i * stride;
+        dataFloats.set(allFloats.subarray(base, base + stride), dstBase);
     }
 
     const totalBytes = headerBytes.length + dataFloats.byteLength;
@@ -161,7 +155,6 @@ export function buildPlySubset(allFloats, vertexIndices) {
     const outView = new Uint8Array(outBuffer);
     outView.set(headerBytes, 0);
     outView.set(new Uint8Array(dataFloats.buffer), headerBytes.length);
-
     return outBuffer;
 }
 
